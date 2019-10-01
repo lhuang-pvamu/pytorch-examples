@@ -8,6 +8,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import os
 from scipy.misc import imread
+import time
 
 torch.autograd.set_detect_anomaly(True)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -157,12 +158,17 @@ if __name__ == '__main__':
 
 
     for epoch in range(100):
+        start = time.time()
         init_model1 = init_model.to(device=torch.device(device))
         init_vx, init_vy = convert_param_vector_to_matrices(init_model1, rows, cols)
         y_h = simulate(init_vx, init_vy, init_smoke, cell_ys, cell_xs, simulation_timesteps)
         loss = distance_from_target_image(y_h, target)
+        end_forward = time.time()
+        print("forward timing: {}".format(end_forward - start))
         optimizer.zero_grad()
         loss.backward()
+        end_backward = time.time()
+        print("backward timing: {}".format(end_backward-end_forward))
         print(epoch, loss)
         optimizer.step()
         # print("grad: ", x_val, y_val, w.data, b.data, w.grad.data[0], b.grad.data[0])
