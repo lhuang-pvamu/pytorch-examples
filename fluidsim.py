@@ -30,22 +30,22 @@ def roll(x: torch.Tensor, shift: int, axis: int = -1):
         return torch.cat([gap, x.index_select(axis, torch.arange(shift).long())], dim=axis)
 '''
 
-@torch.jit.script
+#@torch.jit.script
 def roll(x: torch.Tensor, shift: int, axis: int):
     if shift != 0:
         return x
 
     if axis == 0:
-        return torch.cat((x[-shift:,:], x[:-shift,:]), dim=axis)
+        return torch.cat((x[-shift:,:], x[:-shift,:]), dim=axis).to(device)
     else:
-        return torch.cat((x[:,-shift:], x[:,:-shift]), dim=axis)
+        return torch.cat((x[:,-shift:], x[:,:-shift]), dim=axis).to(device)
 
-@torch.jit.script
+#@torch.jit.script
 def project(vx, vy):
     """Project the velocity field to be approximately mass-conserving,
        using a few iterations of Gauss-Seidel."""
-    p = torch.zeros(vx.shape)
-    h = 1.0/torch.tensor(vx.shape[0]).float()
+    p = torch.zeros(vx.shape).to(device)
+    h = 1.0/torch.tensor(vx.shape[0]).float().to(device)
     div = -0.5 * h * (roll(vx, -1, axis=0) - roll(vx, 1, axis=0)
                     + roll(vy, -1, axis=1) - roll(vy, 1, axis=1))
 
@@ -62,18 +62,18 @@ def advect(f:torch.Tensor, vx:torch.Tensor, vy:torch.Tensor, cell_ys:torch.Tenso
     """Move field f according to x and y velocities (u and v)
        using an implicit Euler integrator."""
     rows, cols = f.shape
-    center_xs = (cell_xs - vx).view(-1)
-    center_ys = (cell_ys - vy).view(-1)
+    center_xs = (cell_xs - vx).view(-1).to(device)
+    center_ys = (cell_ys - vy).view(-1).to(device)
 
     # Compute indices of source cells.
-    left_ix = torch.floor(center_xs)
-    top_ix  = torch.floor(center_ys)
-    rw = center_xs - left_ix              # Relative weight of right-hand cells.
-    bw = center_ys - top_ix               # Relative weight of bottom cells.
-    left_ix  = torch.fmod(left_ix,     rows).long()  # Wrap around edges of simulation.
-    right_ix = torch.fmod(left_ix + 1, rows).long()
-    top_ix   = torch.fmod(top_ix,      cols).long()
-    bot_ix   = torch.fmod(top_ix  + 1, cols).long()
+    left_ix = torch.floor(center_xs).to(device)
+    top_ix  = torch.floor(center_ys).to(device)
+    rw = (center_xs - left_ix).to(device)              # Relative weight of right-hand cells.
+    bw = (center_ys - top_ix).to(device)               # Relative weight of bottom cells.
+    left_ix  = torch.fmod(left_ix,     rows).long().to(device)  # Wrap around edges of simulation.
+    right_ix = torch.fmod(left_ix + 1, rows).long().to(device)
+    top_ix   = torch.fmod(top_ix,      cols).long().to(device)
+    bot_ix   = torch.fmod(top_ix  + 1, cols).long().to(device)
     #print(left_ix,right_ix,top_ix,bot_ix)
 
     # A linearly-weighted sum of the 4 surrounding cells.
@@ -85,12 +85,12 @@ def advect(f:torch.Tensor, vx:torch.Tensor, vy:torch.Tensor, cell_ys:torch.Tenso
 def simulate(vx, vy, smoke, cell_ys, cell_xs, num_time_steps=200, ax=None, render=False):
     print("Running simulation...")
     for t in range(num_time_steps):
-        if ax: plot_matrix(ax, smoke.detach().numpy(), t, render)
+        if ax: plot_matrix(ax, smoke.cpu().detach().numpy(), t, render)
         vx_updated = advect(vx, vx, vy, cell_ys, cell_xs)
         vy_updated = advect(vy, vx, vy, cell_ys, cell_xs)
         vx, vy = project(vx_updated, vy_updated)
         smoke = advect(smoke, vx, vy, cell_ys, cell_xs)
-    if ax: plot_matrix(ax, smoke.detach().numpy(), num_time_steps, render)
+    if ax: plot_matrix(ax, smoke.cpu().detach().numpy(), num_time_steps, render)
     return smoke
 
 def plot_matrix(ax, mat, t, render=False):
@@ -107,9 +107,9 @@ def distance_from_target_image(smoke, target):
     return torch.mean((target - smoke)**2)
 
 def convert_param_vector_to_matrices(params, rows, cols):
-    vx = params[:(rows*cols)].view(rows,cols) #
+    vx = params[:(rows*cols)].view(rows,cols).to(device) #
     #vx = np.reshape(params[:(rows*cols)], (rows, cols))
-    vy = params[(rows*cols):].view(rows,cols) #
+    vy = params[(rows*cols):].view(rows,cols).to(device) #
     #vy = np.reshape(params[(rows*cols):], (rows, cols))
     return vx, vy
 
@@ -130,15 +130,15 @@ if __name__ == '__main__':
     rows, cols = target.shape
 
     init_dx_and_dy = np.zeros((2, rows, cols)).ravel()
-    init_model = Variable(torch.from_numpy(init_dx_and_dy).float(), requires_grad=True).to(device=torch.device(device))
-    init_smoke = Variable(torch.from_numpy(init_smoke).float()).to(device=torch.device(device))
-    target = Variable(torch.from_numpy(target).float()).to(device=torch.device(device))
+    init_smoke = Variable(torch.from_numpy(init_smoke).float()).to(device)
+    target = Variable(torch.from_numpy(target).float()).to(device)
+    init_model = Variable(torch.from_numpy(init_dx_and_dy).float(), requires_grad=True)
 
     cell_ys, cell_xs = np.meshgrid(np.arange(rows), np.arange(cols))
 
     #print(cell_ys, cell_xs)
-    cell_ys = torch.from_numpy(cell_ys).float()
-    cell_xs = torch.from_numpy(cell_xs).float()
+    cell_ys = torch.from_numpy(cell_ys).float().to(device)
+    cell_xs = torch.from_numpy(cell_xs).float().to(device)
 
     fig = plt.figure(figsize=(8,8))
     ax = fig.add_subplot(111, frameon=False)
@@ -157,7 +157,8 @@ if __name__ == '__main__':
 
 
     for epoch in range(100):
-        init_vx, init_vy = convert_param_vector_to_matrices(init_model, rows, cols)
+        init_model1 = init_model.to(device=torch.device(device))
+        init_vx, init_vy = convert_param_vector_to_matrices(init_model1, rows, cols)
         y_h = simulate(init_vx, init_vy, init_smoke, cell_ys, cell_xs, simulation_timesteps)
         loss = distance_from_target_image(y_h, target)
         optimizer.zero_grad()
@@ -169,7 +170,8 @@ if __name__ == '__main__':
         #init_model.grad.data.zero_()
 
     print("Rendering optimized flow...")
-    init_vx, init_vy = convert_param_vector_to_matrices(init_model, rows, cols)
+    init_model1 = init_model.to(device=torch.device(device))
+    init_vx, init_vy = convert_param_vector_to_matrices(init_model1, rows, cols)
     simulate(init_vx, init_vy, init_smoke, cell_ys, cell_xs, simulation_timesteps, ax, render=True)
 
     print("Converting frames to an animated GIF...")
