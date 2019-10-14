@@ -28,6 +28,7 @@ def ricker(t, config):
 config['nu0'] = 10  # Hz
 
 # Evaluate wavelet and plot it
+'''
 ts = np.linspace(0, 0.5, 1000)
 ws = ricker(ts, config)
 
@@ -42,7 +43,7 @@ plt.ylabel(r'$w(t)$', fontsize=18)
 plt.title('Ricker Wavelet', fontsize=22)
 
 plt.legend()
-
+'''
 
 ##############################################################################
 # Problem 1.2
@@ -176,7 +177,7 @@ print( 'Generated %d wavefields of shape'%len(us), us[0].shape)
 ##############################################################################
 # Problem 1.5
 
-def plot_space_time(u, config, title=None):
+def plot_space_time(u, config, overlay=None, title=None):
 
     # Plots a wavefield u
     xlim = config['x_limits']
@@ -188,19 +189,25 @@ def plot_space_time(u, config, title=None):
     img = np.zeros([nt,nx])
     for it in range(nt):
         img[it,:] = u[it]
+    if overlay:
+        ovr = np.zeros([nt,nx])
+        for it in range(nt):
+            ovr[it,:] = overlay[it]
 
     f = plt.figure(tight_layout=True)
     ax = plt.axes()
     #ax.set_xlim(xlim)
     #ax.set_ylim((0,T))
-    ax.set_title(title,fontsize=16)
+    ax.set_title(title,fontsize=14)
     plt.imshow(img, cmap='gray', aspect='auto')
-    plt.colorbar()
+    if overlay:
+        plt.imshow(ovr, cmap='seismic', alpha=0.6, aspect='auto')
+    #plt.colorbar()
 
     plt.xlabel(r'space($x$) km', fontsize=14)
-    xtlabel = np.linspace(xlim[0],xlim[1],5,endpoint=True)
-    xtpos = np.linspace(0,nx,5,endpoint=True) 
-    plt.xticks( ticks=xtpos, labels=xtlabel )
+    xtlabel = np.linspace(xlim[0],xlim[1],11,endpoint=True)
+    xtpos = np.linspace(0,nx,11,endpoint=True) 
+    plt.xticks( ticks=xtpos, labels=np.around(xtlabel,decimals=1) )
 
     plt.ylabel(r'time($t$) sec', fontsize=14)
     ytlabel = np.arange(0., T+0.5, 0.5)
@@ -262,23 +269,46 @@ us, d = forward_operator(C, config)
 
 # The last argument False excludes the end point from the list
 ts = np.linspace(0, config['T'], config['nt'], False)
-
+'''
 plt.figure()
 plt.plot(ts, d, label=r'$x_r =\,{0}$'.format(config['x_r']), linewidth=2)
 plt.xlabel(r'$t$', fontsize=16)
 plt.ylabel(r'$d(t)$', fontsize=16)
 plt.title('Trace at $x_r={0}$'.format(config['x_r']), fontsize=18)
 plt.legend()
-
 '''
 ##############################################################################
 # Problem 2.1
+# Residual trace from proposal model C0
 
-
+u0s, d0 = forward_operator(C0, config)
+r = d - d0
+'''
+plt.figure()
+plt.plot(ts, r, label=r'$x_r =\,{0}$'.format(config['x_r']), linewidth=2)
+plt.xlabel(r'$t$', fontsize=16)
+plt.ylabel(r'$d(t)$', fontsize=16)
+plt.title('Residual trace at $x_r={0}$'.format(config['x_r']), fontsize=18)
+plt.legend()
+'''
 
 ##############################################################################
 # Problem 2.2
+# Adjoint wavefield from 'sources' at receiver positions
 
+# Generate adjoint sources
+nt = config['nt']
+adjsrc = list()
+for it in range(nt):
+    t = it*config['dt']
+    # Source in reverse-time order
+    f = point_source(r[nt-it-1], config['x_r'], config)
+    adjsrc.append(f)
+print( 'Built %d adjoint sources of dimension %d'%(len(adjsrc), len(adjsrc[0])) )
+
+# Generate adjoint wavefields
+qs = advance(C0, adjsrc, config)
+print( 'Generated %d adjoint wavefields of shape'%len(qs), qs[0].shape)
 
 
 ##############################################################################
@@ -286,9 +316,33 @@ plt.legend()
 
 def imaging_condition(qs, u0s, config):
 
-    # implementation goes here
+    # Imaging condition of trial wavefield u0s with adjoint field qs
+    nx = config['nx']
+    nt = config['nt']
+    dt = config['dt']
+    dtscl = 1./dt**3
+    upad = np.zeros( nx )
+    uprev = upad.copy()
+    ucurr = upad.copy()
+    unext = u0s[0]
+    image = np.zeros( nx )
+
+    # Integration loop, reversed through adjoint wavefield
+    for it in range(nt):
+        uprev = ucurr
+        ucurr = unext
+        if it==nt-1:
+            unext = upad.copy()
+        else:
+            unext = u0s[it+1]
+        Irtm = qs[nt-it-1]*Dtt( uprev, ucurr, unext ) 
+        image -= Irtm*dtscl 
 
     return image
+
+def Dtt( uprev, ucurr, unext ):
+    # Second time derivative
+    return uprev - 2.*ucurr + unext
 
 # Compute the image
 I_rtm = imaging_condition(qs, u0s, config)
@@ -299,16 +353,40 @@ dC = C-C0
 
 plt.figure()
 plt.subplot(2, 1, 1)
+plt.plot(xs,  C, label=r'$C$')
+plt.plot(xs, C0, label=r'$C0$')
 plt.plot(xs, dC, label=r'$\delta C$')
 plt.legend()
 plt.subplot(2, 1, 2)
-plt.plot(xs, I_rtm, label=r'$I_\text{RTM}$')
+plt.plot(xs, I_rtm, label=r'$I_{RTM}$')
 plt.legend()
-
 
 ##############################################################################
 # Problem 2.4
+# Wavefield comparisons for imaging condition
 
+# Trial wavefield second derivative
+dtscl = 1./config['dt']**2
+upad = np.zeros( config['nx'] )
+
+uprev = upad.copy()
+ucurr = upad.copy()
+unext = u0s[0]
+DttU0 = list()
+qsrev = list()
+
+for it in range(config['nt']):
+    uprev = ucurr
+    ucurr = unext
+    if it==nt-1:
+        unext = upad.copy()
+    else:
+        unext = u0s[it+1]
+    DttU0.append( Dtt( uprev, ucurr, unext ) * dtscl )
+    qsrev.append( qs[nt-it-1] )
+
+plot_space_time(qsrev, config, overlay=DttU0, \
+    title=r'Imaging wavefields, DttU0 (color) and adjoint (gray)')
 
 
 ##############################################################################
@@ -316,12 +394,24 @@ plt.legend()
 
 def adjoint_operator(C0, d, config):
 
-    # implementation goes here
+    # Generate adjoint sources
+    nt = config['nt']
+    adjsrc = list()
+    for it in range(nt):
+        t = it*config['dt']
+        # Source in reverse-time order
+        f = point_source(d[nt-it-1], config['x_r'], config)
+        adjsrc.append(f)
+
+    # Generate adjoint wavefields
+    qs = advance(C0, adjsrc, config)
+
+    # Compute the image
+    image = imaging_condition(qs, u0s, config)
 
     return image
 
-
-
+'''
 ##############################################################################
 # Problem 3.1
 
