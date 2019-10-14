@@ -26,7 +26,7 @@ def ricker(t, config):
 
 # Configure source wavelet
 config['nu0'] = 10  # Hz
-'''
+
 # Evaluate wavelet and plot it
 ts = np.linspace(0, 0.5, 1000)
 ws = ricker(ts, config)
@@ -42,7 +42,7 @@ plt.ylabel(r'$w(t)$', fontsize=18)
 plt.title('Ricker Wavelet', fontsize=22)
 
 plt.legend()
-'''
+
 
 ##############################################################################
 # Problem 1.2
@@ -51,15 +51,13 @@ def point_source(value, position, config):
 
     nx = config['nx']
     dx = config['dx']
-    bgn, end = config['x_limits']
-    xv = np.linspace( bgn, end, nx ) - position
+    xbgn, xend = config['x_limits']
     f = np.zeros([nx])
-    for ix in range(len(xv)):
-        if xv[ix] >= 0. :
-            frac = xv[ix] / dx
-            f[ix] = (1. - frac) * value
-            f[ix-1] = frac * value
-            break
+    xpos = position - xbgn
+    ixs = int(max(1, np.ceil( xpos/dx )))
+    frac = ixs*dx - xpos
+    f[ixs] = (1. - frac) * value
+    f[ixs-1] = frac * value
 
     return f
 
@@ -210,47 +208,52 @@ def plot_space_time(u, config, title=None):
     ytpos = np.arange(0, nt+delt, delt) 
     plt.yticks( ticks=ytpos, labels=ytlabel )
     
+# Plot wavefield
+plot_space_time(us, config, title=r'Wavefield u($x,t$)')
 
-# Plot wavefields
-#plot_space_time(sources, config, title=r'f(x,t)')
-plot_space_time(us, config, title=r'wavefield u($x,t$)')
-
-'''
 ##############################################################################
 # Problem 1.6
 
 def record_data(u, config):
 
-    # implementation goes here
-def point_source(value, position, config):
-
     nx = config['nx']
     dx = config['dx']
+    nt = config['nt']
     x_r = config['x_r']
-    bgn, end = config['x_limits']
-    xv = np.linspace( bgn, end, nx ) - x_r
-    f = np.zeros([nx])
-    for ix in range(len(xv)):
-        if xv[ix] >= 0. :
-            frac = xv[ix] / dx
-            f[ix] = (1. - frac) * value
-            f[ix-1] = frac * value
-            break
+    xbgn, xend = config['x_limits']
 
-    return f
+    xpos = x_r - xbgn
+    ixr = int(max(1, np.ceil( xpos/dx )))
+    frac = ixr*dx - xpos
+    trc = np.zeros([nt])
+    for it in range(nt):
+        trc[it] = frac*u[it][ixr-1] + (1. - frac)*u[it][ixr]
 
-    return d
+    return trc
 
 # Receiver position
 config['x_r'] = 0.15
-
 
 ##############################################################################
 # Problem 1.7
 
 def forward_operator(C, config):
 
-    # implementation goes here
+    # Set up the propagation matrices
+    M, A, K = wave_matrices(C, config)
+
+    # Define the sources
+    sources = list()
+    for it in range(config['nt']):
+        t = it*config['dt']
+        f = point_source(ricker(t, config), config['x_s'], config)
+        sources.append(f)
+
+    # Generate wavefields
+    us = advance(C, sources, config)
+
+    # Extract wave data at receiver
+    trace = record_data(us, config)
 
     return us, trace
 
@@ -262,12 +265,12 @@ ts = np.linspace(0, config['T'], config['nt'], False)
 
 plt.figure()
 plt.plot(ts, d, label=r'$x_r =\,{0}$'.format(config['x_r']), linewidth=2)
-plt.xlabel(r'$t$', fontsize=18)
-plt.ylabel(r'$d(t)$', fontsize=18)
-plt.title('Trace at $x_r={0}$'.format(config['x_r']), fontsize=22)
+plt.xlabel(r'$t$', fontsize=16)
+plt.ylabel(r'$d(t)$', fontsize=16)
+plt.title('Trace at $x_r={0}$'.format(config['x_r']), fontsize=18)
 plt.legend()
 
-
+'''
 ##############################################################################
 # Problem 2.1
 
