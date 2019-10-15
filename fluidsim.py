@@ -7,7 +7,7 @@ from torch.autograd import Variable
 import matplotlib
 import matplotlib.pyplot as plt
 import os
-from scipy.misc import imread
+from imageio import imread
 import time
 
 torch.autograd.set_detect_anomaly(True)
