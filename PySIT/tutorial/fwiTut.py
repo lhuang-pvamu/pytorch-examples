@@ -1,3 +1,5 @@
+#  PySIT Tutorial exercises
+
 import math
 import numpy as np
 import matplotlib.pyplot as plt
@@ -54,8 +56,11 @@ def point_source(value, position, config):
     dx = config['dx']
     xbgn, xend = config['x_limits']
     f = np.zeros([nx])
+    # Find the first spatial sample point beyond the source location
     xpos = position - xbgn
     ixs = int(max(1, np.ceil( xpos/dx )))
+    # Distribute the unit amplitude proportionally 
+    # between the two neighboring sample positions
     frac = ixs*dx - xpos
     f[ixs] = (1. - frac) * value
     f[ixs-1] = frac * value
@@ -83,31 +88,34 @@ def wave_matrices(C, config):
     nx = config['nx']
 
     # Stiffness (Left,Middle,Right)
+    left = 0; mid = 1; right = 2  # K-indices
+    lbdry = 0; rbdry = -1  # boundary indices
+
     #  boundaries:
     Kx = np.zeros([3,nx])
-    Kx[1,0]  = +C[0]*dt / dx
-    Kx[2,0]  = -C[0]*dt / dx
-    Kx[0,-1] = -C[-1]*dt / dx
-    Kx[1,-1] = +C[-1]*dt / dx
+    Kx[mid,  lbdry] = -C[lbdry]*dt / dx
+    Kx[right,lbdry] = +C[lbdry]*dt / dx
+    Kx[left, rbdry] = +C[rbdry]*dt / dx
+    Kx[mid,  rbdry] = -C[rbdry]*dt / dx
 
     #  interior:
     Cwgt = (C * dt / dx)**2
     Kxx = np.zeros([3,nx])
-    Kxx[0][1:-1] = +1. * Cwgt[0:-2]
-    Kxx[1][1:-1] = -2. * Cwgt[1:-1]
-    Kxx[2][1:-1] = +1. * Cwgt[2:]
+    Kxx[left, 1:-1] = +1. * Cwgt[0:-2]
+    Kxx[mid,  1:-1] = -2. * Cwgt[1:-1]
+    Kxx[right,1:-1] = +1. * Cwgt[2:]
 
     K = Kx + Kxx
 
-    # Attenuation (Current)
+    # Attenuation (Current time step)
     A = np.zeros([nx])
-    A[0]  = C[0]*dt/dx
-    A[-1] = -C[-1]*dt/dx
+    A[lbdry] = 1.
+    A[rbdry] = 1.
 
-    # Mass (Previous,Current)
+    # Mass (0 Previous, 1 Current)
     M = np.zeros([2,nx])
-    M[0,:] = -1.
-    M[1,:] = +2.
+    M[0,1:-1] = -1.
+    M[1,1:-1] = +2.
     
     return M, A, K
 
@@ -123,34 +131,44 @@ C, C0 = basic_model(config)
 
 def advance(C, sources, config):
 
-    # 1D wavefield propagation
+    # 1D wavefield propagation [Tutorial 'leap_frog' function]
     dt = config['dt']
     nt = config['nt']
     dx = config['dx']
     nx = config['nx']
     C2dt2 = (C * dt)**2
     M, A, K = wave_matrices(C, config)
+    left = 0; mid = 1; right = 2  # K-indices
+    lbdry = 0; rbdry = -1  # boundary indices
 
     # Initial conditions (time-steps are Previous, Current, Next)
+    # Set up cycling through triple u-buffers
     prev = 0; curr = 1; next = 2
     u = np.zeros([3,nx])
     us = list()
     
     # loop over time-steps
     for it in range(nt):
+        # Cycle through the wavefield buffers
         temp = prev; prev = curr; curr = next; next = temp
+        f = sources[it] * C2dt2
+
+        m = u[curr,:]*M[1,:] + u[prev,:]*M[0,:]
+        a = u[curr,:]*A
+        k = np.zeros([nx])
         
         # interior points
-        m = u[curr, 1:-1]*M[1, 1:-1] + u[prev, 1:-1]*M[0, 1:-1]
-        k = u[curr, 0:-2]*K[0, 1:-1] + u[curr, 1:-1]*K[1, 1:-1] \
-          + u[curr, 2:  ]*K[2, 1:-1]
-        f = sources[it][1:-1] * C2dt2[1:-1]
+        k[1:-1] = u[curr, left:-2]*K[left, 1:-1] \
+                + u[curr, mid :-1]*K[mid,  1:-1] \
+                + u[curr, right: ]*K[right,1:-1]
 
-        u[next, 1:-1] = m + k + f
+        # boundary points (0 lbdry, -1 rbdry)
+        k[lbdry] = u[curr, lbdry+1]*K[right,lbdry] \
+                 + u[curr, lbdry  ]*K[mid,  lbdry]
+        k[rbdry] = u[curr, rbdry-1]*K[left, rbdry] \
+                 + u[curr, rbdry  ]*K[mid,  rbdry]
 
-        # boundary points
-        u[next, 0] = u[curr, 0] + A[ 0]*(u[curr, 1] - u[curr, 0])
-        u[next,-1] = u[curr,-1] + A[-1]*(u[curr,-1] - u[curr,-2])
+        u[next,:] = m + a + k + f
 
         us.append( u[next,:].copy() )
             
@@ -196,13 +214,10 @@ def plot_space_time(u, config, overlay=None, title=None):
 
     f = plt.figure(tight_layout=True)
     ax = plt.axes()
-    #ax.set_xlim(xlim)
-    #ax.set_ylim((0,T))
     ax.set_title(title,fontsize=14)
     plt.imshow(img, cmap='gray', aspect='auto')
     if overlay:
         plt.imshow(ovr, cmap='seismic', alpha=0.6, aspect='auto')
-    #plt.colorbar()
 
     plt.xlabel(r'space($x$) km', fontsize=14)
     xtlabel = np.linspace(xlim[0],xlim[1],11,endpoint=True)
@@ -347,6 +362,7 @@ def Dtt( uprev, ucurr, unext ):
 # Compute the image
 I_rtm = imaging_condition(qs, u0s, config)
 
+'''
 # Plot the comparison
 xs = np.arange(config['nx'])*config['dx']
 dC = C-C0
@@ -360,6 +376,7 @@ plt.legend()
 plt.subplot(2, 1, 2)
 plt.plot(xs, I_rtm, label=r'$I_{RTM}$')
 plt.legend()
+'''
 
 ##############################################################################
 # Problem 2.4
@@ -411,63 +428,70 @@ def adjoint_operator(C0, d, config):
 
     return image
 
-'''
+
 ##############################################################################
 # Problem 3.1
 
 def linear_sources(dm, u0s, config):
 
-    # implementation goes here
+    # Source wavefields for linear modeling equations
+    nx = config['nx']
+    nt = config['nt']
+    dt = config['dt']
+    upad = np.zeros( nx )
+
+    uprev = upad.copy()
+    ucurr = upad.copy()
+    unext = u0s[0]
+    sources = list()
+
+    for it in range(nt):
+        uprev = ucurr
+        ucurr = unext
+        if it==nt-1:
+            unext = upad.copy()
+        else:
+            unext = u0s[it+1]
+        sources.append( -dm*Dtt( uprev, ucurr, unext ) )
 
     return sources
 
-
+'''
 ##############################################################################
 # Problem 3.2
 
 def linear_forward_operator(C0, dm, config):
 
-    # implementation goes here
+    # Propagator with dm as linearized source
 
-    return u1s
+    # Set up the propagation matrices
+    M, A, K = wave_matrices(C0, config)
+
+    # Generate wavefields
+    u1s = advance(C0, dm, config)
+
+    # Extract wave data at receiver
+    trace = record_data(us, config)
+
+    return u1s, trace
+
+linsrc = linear_sources(dm, u0s, config)
+u1s, d = linear_forward_operator(C0, linsrc, config)
 
 
 ##############################################################################
 # Problem 3.3
 
 def adjoint_condition(C0, config):
+    
+    # Test for equality of:
+    #    dot( Sampled(Forward(dm)), data )  [in data domain] and
+    #    dot( dm, Adjoint(Sampled(data)) )  [in model domain]
 
-    # implementation goes here
-    pass
-
-
-##############################################################################
-# Problem 4.1
-
-def gradient_descent(C0, d, k, config):
-
-    # implementation goes here
-
-    return sources
-
-
-##############################################################################
-# Problem 3.2
-
-def linear_forward_operator(C0, dm, config):
-
-    # implementation goes here
-
-    return u1s
-
-
-##############################################################################
-# Problem 3.3
-
-def adjoint_condition(C0, config):
-
-    # implementation goes here
-    pass
+    # LHS (data domain)
+    u0s, data = forward_operator(C0, config)
+    linsrc = linear_sources(dm, u0s, config)
+    u1s, d = linear_forward_operator(C0, linsrc, config)
 
 
 ##############################################################################
