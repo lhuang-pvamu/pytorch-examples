@@ -88,7 +88,7 @@ def wave_matrices(C, config):
     nx = config['nx']
 
     # Stiffness (Left,Middle,Right)
-    left = 0; mid = 1; right = 2  # K-indices
+    left = 0; mid = 1; right = 2  # K-indices - spatial neighbors
     lbdry = 0; rbdry = -1  # boundary indices
 
     #  boundaries:
@@ -101,9 +101,9 @@ def wave_matrices(C, config):
     #  interior:
     Cwgt = (C * dt / dx)**2
     Kxx = np.zeros([3,nx])
-    Kxx[left, 1:-1] = +1. * Cwgt[0:-2]
+    Kxx[left, 1:-1] = +1. * Cwgt[1:-1]
     Kxx[mid,  1:-1] = -2. * Cwgt[1:-1]
-    Kxx[right,1:-1] = +1. * Cwgt[2:]
+    Kxx[right,1:-1] = +1. * Cwgt[1:-1]
 
     K = Kx + Kxx
 
@@ -142,35 +142,32 @@ def advance(C, sources, config):
     lbdry = 0; rbdry = -1  # boundary indices
 
     # Initial conditions (time-steps are Previous, Current, Next)
-    # Set up cycling through triple u-buffers
-    prev = 0; curr = 1; next = 2
-    u = np.zeros([3,nx])
-    us = list()
+    # Set up cycling through three time positions: Previous, Current, Next
+    uP = np.zeros([nx])
+    uC = np.zeros([nx])
+    us = list() 	# list of output wavefields
     
     # loop over time-steps
     for it in range(nt):
-        # Cycle through the wavefield buffers
-        temp = prev; prev = curr; curr = next; next = temp
-        f = sources[it] * C2dt2
 
-        m = u[curr,:]*M[1,:] + u[prev,:]*M[0,:]
-        a = u[curr,:]*A
-        k = np.zeros([nx])
+        f = sources[it] * C2dt2
+        m = np.sum( np.stack([uP,uC]) * M, axis=0 )
+        a = uC * A
         
-        # interior points
-        k[1:-1] = u[curr, left:-2]*K[left, 1:-1] \
-                + u[curr, mid :-1]*K[mid,  1:-1] \
-                + u[curr, right: ]*K[right,1:-1]
+        # interior points (computing all, but endpoints will be replaced)
+        k = np.sum( np.stack([np.roll(uC,1), uC, np.roll(uC,-1)] ) * K, axis=0)
 
         # boundary points (0 lbdry, -1 rbdry)
-        k[lbdry] = u[curr, lbdry+1]*K[right,lbdry] \
-                 + u[curr, lbdry  ]*K[mid,  lbdry]
-        k[rbdry] = u[curr, rbdry-1]*K[left, rbdry] \
-                 + u[curr, rbdry  ]*K[mid,  rbdry]
+        k[lbdry] = uC[lbdry+1]*K[right,lbdry] \
+                 + uC[lbdry  ]*K[mid,  lbdry]
+        k[rbdry] = uC[rbdry-1]*K[left, rbdry] \
+                 + uC[rbdry  ]*K[mid,  rbdry]
 
-        u[next,:] = m + a + k + f
-
-        us.append( u[next,:].copy() )
+        uN = m + a + k + f
+        
+        us.append( uN.copy() )
+        uP = uC
+        uC = uN
             
     return us
 
