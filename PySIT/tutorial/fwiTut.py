@@ -1,5 +1,6 @@
 #  PySIT Tutorial exercises
 
+import sys
 import math
 import numpy as np
 import matplotlib.pyplot as plt
@@ -93,29 +94,33 @@ def wave_matrices(C, config):
 
     #  boundaries:
     Kx = np.zeros([3,nx])
-    Kx[mid,  lbdry] = -C[lbdry]*dt / dx
-    Kx[right,lbdry] = +C[lbdry]*dt / dx
-    Kx[left, rbdry] = +C[rbdry]*dt / dx
-    Kx[mid,  rbdry] = -C[rbdry]*dt / dx
+    Kx[mid,  lbdry] = -C[lbdry] / (dx * dt)
+    Kx[right,lbdry] = +C[lbdry] / (dx * dt)
+    Kx[left, rbdry] = +C[rbdry] / (dx * dt)
+    Kx[mid,  rbdry] = -C[rbdry] / (dx * dt)
 
     #  interior:
-    Cwgt = (C * dt / dx)**2
+    Cwgt = (C[1:-1] / dx)**2
     Kxx = np.zeros([3,nx])
-    Kxx[left, 1:-1] = +1. * Cwgt[1:-1]
-    Kxx[mid,  1:-1] = -2. * Cwgt[1:-1]
-    Kxx[right,1:-1] = +1. * Cwgt[1:-1]
+    Kxx[left, 1:-1] = +1. * Cwgt
+    Kxx[mid,  1:-1] = -2. * Cwgt
+    Kxx[right,1:-1] = +1. * Cwgt
 
-    K = Kx + Kxx
+    K = Kxx + Kx
 
     # Attenuation (Current time step)
     A = np.zeros([nx])
-    A[lbdry] = 1.
-    A[rbdry] = 1.
-
+    A[lbdry] = 1./dt 
+    A[rbdry] = 1./dt 
+ 
+    '''
     # Mass (0 Previous, 1 Current)
     M = np.zeros([2,nx])
     M[0,1:-1] = -1.
     M[1,1:-1] = +2.
+    '''
+    M = np.zeros([nx])
+    M[1:-1] = 1.
     
     return M, A, K
 
@@ -127,7 +132,7 @@ C, C0 = basic_model(config)
 
 
 ##############################################################################
-# Problem 1.4
+# Problem 1.4 -- modified as first-derivative ODE system
 
 def advance(C, sources, config):
 
@@ -136,37 +141,42 @@ def advance(C, sources, config):
     nt = config['nt']
     dx = config['dx']
     nx = config['nx']
-    C2dt2 = (C * dt)**2
+    Csq = C**2
     M, A, K = wave_matrices(C, config)
     left = 0; mid = 1; right = 2  # K-indices
     lbdry = 0; rbdry = -1  # boundary indices
 
-    # Initial conditions (time-steps are Previous, Current, Next)
-    # Set up cycling through three time positions: Previous, Current, Next
-    uP = np.zeros([nx])
+    # Set up first-derivative system, 
+    # time positions Current (C) and Next (N)
+    vC = np.zeros([nx])
     uC = np.zeros([nx])
     us = list() 	# list of output wavefields
     
     # loop over time-steps
     for it in range(nt):
+        us.append( uC )
 
-        f = sources[it] * C2dt2
-        m = np.sum( np.stack([uP,uC]) * M, axis=0 )
-        a = uC * A
-        
-        # interior points (computing all, but endpoints will be replaced)
+        f = sources[it] * Csq  # C2dt2
+        # m = np.sum( np.stack([uP,uC]) * M, axis=0 )
+        # m = M  Mass matrix 1/Csq is not used in this version
+
+        # Stiffness -- interior points 
+        # (computing all, but endpoints will be replaced)
         k = np.sum( np.stack([np.roll(uC,1), uC, np.roll(uC,-1)] ) * K, axis=0)
-
+        
         # boundary points (0 lbdry, -1 rbdry)
         k[lbdry] = uC[lbdry+1]*K[right,lbdry] \
                  + uC[lbdry  ]*K[mid,  lbdry]
         k[rbdry] = uC[rbdry-1]*K[left, rbdry] \
                  + uC[rbdry  ]*K[mid,  rbdry]
-
-        uN = m + a + k + f
         
-        us.append( uN.copy() )
-        uP = uC
+        # Attenuation
+        a = Csq * A * vC
+
+        vN = vC + dt*(f + k - a)
+        uN = uC + dt*vN
+        
+        vC = vN
         uC = uN
             
     return us
@@ -183,7 +193,7 @@ for it in range(config['nt']):
     t = it*config['dt']
     f = point_source(ricker(t, config), config['x_s'], config)
     sources.append(f)
-print( 'Built %d sources of dimension %d'%(len(sources), len(sources[0])) )
+#print( 'Built %d sources of dimension %d'%(len(sources), len(sources[0])) )
 
 # Generate wavefields
 us = advance(C, sources, config)
@@ -316,7 +326,7 @@ for it in range(nt):
     # Source in reverse-time order
     f = point_source(r[nt-it-1], config['x_r'], config)
     adjsrc.append(f)
-print( 'Built %d adjoint sources of dimension %d'%(len(adjsrc), len(adjsrc[0])) )
+#print( 'Built %d adjoint sources of dimension %d'%(len(adjsrc), len(adjsrc[0])) )
 
 # Generate adjoint wavefields
 qs = advance(C0, adjsrc, config)
