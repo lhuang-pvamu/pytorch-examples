@@ -3,11 +3,13 @@
 import sys
 import math
 import numpy as np
+import numpy.random
 import matplotlib.pyplot as plt
 
 from models import basic_model
 
 config = dict()
+config['bc'] = 'absorbing'
 
 
 ##############################################################################
@@ -87,31 +89,34 @@ def wave_matrices(C, config):
     dt = config['dt']
     dx = config['dx']
     nx = config['nx']
+    bc = config['bc']
+    fixedBC = bc=='fixed'
 
-    # Stiffness (Left,Middle,Right)
-    left = 0; mid = 1; right = 2  # K-indices - spatial neighbors
-    lbdry = 0; rbdry = -1  # boundary indices
+    # Stiffness 
+    # spatial second-order accurate centered and forward differences
+    spcOrder = 2
+    spcCtr = np.array([ 1.,   -2.,  1.   ])
+    spcFwd = np.array([-3./2., 2., -1./2.])
+
+    #  interior points:
+    Cwgt = (C/dx)**2
+    Kxx = np.reshape( np.repeat(spcCtr,nx), [3,nx]) * Cwgt
 
     #  boundaries:
+    lbdry = 0; rbdry = -1  # boundary indices
     Kx = np.zeros([3,nx])
-    Kx[mid,  lbdry] = -C[lbdry] / (dx * dt)
-    Kx[right,lbdry] = +C[lbdry] / (dx * dt)
-    Kx[left, rbdry] = +C[rbdry] / (dx * dt)
-    Kx[mid,  rbdry] = -C[rbdry] / (dx * dt)
+    if not fixedBC:
+        Kx[:,lbdry] =         spcFwd  * C[lbdry] / (dx * dt)
+        Kx[:,rbdry] = np.flip(spcFwd) * C[rbdry] / (dx * dt)
 
-    #  interior:
-    Cwgt = (C[1:-1] / dx)**2
-    Kxx = np.zeros([3,nx])
-    Kxx[left, 1:-1] = +1. * Cwgt
-    Kxx[mid,  1:-1] = -2. * Cwgt
-    Kxx[right,1:-1] = +1. * Cwgt
-
-    K = Kxx + Kx
+    # K = Kxx + Kx
 
     # Attenuation (Current time step)
+    Cwgt = C**2 / dt
     A = np.zeros([nx])
-    A[lbdry] = 1./dt 
-    A[rbdry] = 1./dt 
+    if not fixedBC:
+        A[lbdry] = Cwgt[lbdry] 
+        A[rbdry] = Cwgt[rbdry] 
  
     '''
     # Mass (0 Previous, 1 Current)
@@ -122,7 +127,7 @@ def wave_matrices(C, config):
     M = np.zeros([nx])
     M[1:-1] = 1.
     
-    return M, A, K
+    return M, A, Kx, Kxx
 
 # Load the model
 C, C0 = basic_model(config)
@@ -142,7 +147,7 @@ def advance(C, sources, config):
     dx = config['dx']
     nx = config['nx']
     Csq = C**2
-    M, A, K = wave_matrices(C, config)
+    M, A, Kx, Kxx = wave_matrices(C, config)
     left = 0; mid = 1; right = 2  # K-indices
     lbdry = 0; rbdry = -1  # boundary indices
 
@@ -156,22 +161,23 @@ def advance(C, sources, config):
     for it in range(nt):
         us.append( uC )
 
-        f = sources[it] * Csq  # C2dt2
+        f = sources[it] * Csq / dx
         # m = np.sum( np.stack([uP,uC]) * M, axis=0 )
         # m = M  Mass matrix 1/Csq is not used in this version
 
         # Stiffness -- interior points 
         # (computing all, but endpoints will be replaced)
-        k = np.sum( np.stack([np.roll(uC,1), uC, np.roll(uC,-1)] ) * K, axis=0)
+        k = np.sum( \
+                np.stack( [np.roll(uC,1), uC, np.roll(uC,-1)] ) * Kxx,\
+                axis=0)
         
         # boundary points (0 lbdry, -1 rbdry)
-        k[lbdry] = uC[lbdry+1]*K[right,lbdry] \
-                 + uC[lbdry  ]*K[mid,  lbdry]
-        k[rbdry] = uC[rbdry-1]*K[left, rbdry] \
-                 + uC[rbdry  ]*K[mid,  rbdry]
+        nc = 3
+        k[lbdry] = np.sum( uC[ :+nc]*Kx[:,lbdry], axis=0)
+        k[rbdry] = np.sum( uC[-nc: ]*Kx[:,rbdry], axis=0)
         
         # Attenuation
-        a = Csq * A * vC
+        a = A * vC
 
         vN = vC + dt*(f + k - a)
         uN = uC + dt*vN
@@ -223,6 +229,7 @@ def plot_space_time(u, config, overlay=None, title=None):
     ax = plt.axes()
     ax.set_title(title,fontsize=14)
     plt.imshow(img, cmap='gray', aspect='auto')
+    plt.colorbar()
     if overlay:
         plt.imshow(ovr, cmap='seismic', alpha=0.6, aspect='auto')
 
@@ -267,9 +274,6 @@ config['x_r'] = 0.15
 # Problem 1.7
 
 def forward_operator(C, config):
-
-    # Set up the propagation matrices
-    M, A, K = wave_matrices(C, config)
 
     # Define the sources
     sources = list()
@@ -332,6 +336,8 @@ for it in range(nt):
 qs = advance(C0, adjsrc, config)
 print( 'Generated %d adjoint wavefields of shape'%len(qs), qs[0].shape)
 
+plot_space_time(qs, config, title=r'Adjoint wavefield q($x,t$)')
+
 
 ##############################################################################
 # Problem 2.3
@@ -342,7 +348,8 @@ def imaging_condition(qs, u0s, config):
     nx = config['nx']
     nt = config['nt']
     dt = config['dt']
-    dtscl = 1./dt**3
+    dx = config['dx']
+    dtscl = 1./dt**2      # dx/dt**3
     upad = np.zeros( nx )
     uprev = upad.copy()
     ucurr = upad.copy()
@@ -365,11 +372,10 @@ def imaging_condition(qs, u0s, config):
 def Dtt( uprev, ucurr, unext ):
     # Second time derivative
     return uprev - 2.*ucurr + unext
-
+'''
 # Compute the image
 I_rtm = imaging_condition(qs, u0s, config)
 
-'''
 # Plot the comparison
 xs = np.arange(config['nx'])*config['dx']
 dC = C-C0
@@ -418,6 +424,9 @@ plot_space_time(qsrev, config, overlay=DttU0, \
 
 def adjoint_operator(C0, d, config):
 
+    # Forward wavefields
+    u0s, _ = forward_operator(C0, config)
+
     # Generate adjoint sources
     nt = config['nt']
     adjsrc = list()
@@ -435,18 +444,40 @@ def adjoint_operator(C0, d, config):
 
     return image
 
+# Compute the image
+I_rtm = adjoint_operator(C0, r, config)
+
+# Plot the comparison
+xs = np.arange(config['nx'])*config['dx']
+dC = C0 - C
+
+plt.figure()
+plt.subplot(2, 1, 1, title='Model perturbation and RTM image')
+plt.plot(xs,  C, label=r'$C$')
+plt.plot(xs, C0, label=r'$C0$')
+plt.plot(xs, dC, label=r'$\delta C$')
+plt.legend()
+plt.subplot(2, 1, 2)
+plt.plot(xs, I_rtm, label=r'$I_{RTM}$')
+plt.legend()
+
 
 ##############################################################################
 # Problem 3.1
 
 def linear_sources(dm, u0s, config):
 
-    # Source wavefields for linear modeling equations
+    # Source wavefields for linear modeling equations:
+    #  -dm(x) * Dtt u0(x,t)
     nx = config['nx']
     nt = config['nt']
     dt = config['dt']
-    upad = np.zeros( nx )
+    dmp = dm.copy()
+    dmp[0] = 0.
+    dmp[-1] = 0.
+    dtscl = 1./dt**2
 
+    upad = np.zeros( nx )
     uprev = upad.copy()
     ucurr = upad.copy()
     unext = u0s[0]
@@ -459,48 +490,66 @@ def linear_sources(dm, u0s, config):
             unext = upad.copy()
         else:
             unext = u0s[it+1]
-        sources.append( -dm*Dtt( uprev, ucurr, unext ) )
+        srct = -dmp*dtscl*Dtt( uprev, ucurr, unext )
+        sources.append( srct )
 
     return sources
 
-'''
+
 ##############################################################################
 # Problem 3.2
 
 def linear_forward_operator(C0, dm, config):
 
-    # Propagator with dm as linearized source
-
-    # Set up the propagation matrices
-    M, A, K = wave_matrices(C0, config)
+    # Propagate with linearized source from model perturbation
+    u0s, _ = forward_operator(C0, config)
+    linsrc = linear_sources(dm, u0s, config)
 
     # Generate wavefields
-    u1s = advance(C0, dm, config)
+    u1s = advance(C0, linsrc, config)
 
     # Extract wave data at receiver
-    trace = record_data(us, config)
+    trace = record_data(u1s, config)
 
     return u1s, trace
 
-linsrc = linear_sources(dm, u0s, config)
-u1s, d = linear_forward_operator(C0, linsrc, config)
+u1s, ds = linear_forward_operator(C0, I_rtm, config)
 
 
 ##############################################################################
 # Problem 3.3
 
 def adjoint_condition(C0, config):
-    
-    # Test for equality of:
-    #    dot( Sampled(Forward(dm)), data )  [in data domain] and
-    #    dot( dm, Adjoint(Sampled(data)) )  [in model domain]
+    '''
+    Test for equality of:
+        dot( Sampled(Forward(dm)), data )  [in data domain] and
+        dot( dm, Adjoint(Sampled(data)) )  [in model domain]
+    where 'dm' and 'data' are random model and data values.
+    '''
+
+    # using random values
+    nt = config['nt']
+    nx = config['nx']
+    data = np.random.random((nt,))
+    dm = np.random.random((nx,))
 
     # LHS (data domain)
-    u0s, data = forward_operator(C0, config)
-    linsrc = linear_sources(dm, u0s, config)
-    u1s, d = linear_forward_operator(C0, linsrc, config)
+    _, dfs = linear_forward_operator(C0, dm, config)
+    LHS = np.dot( dfs, data )
 
+    # RHS (model domain)
+    adjt = adjoint_operator(C0, data, config)
+    RHS = np.dot( dm, adjt )
 
+    relerr = abs(LHS-RHS)/abs(LHS+RHS)
+
+    print("Adjoint condition: LHS= %g. RHS= %g"%(LHS,RHS) ) 
+    return relerr
+
+config['bc'] = 'fixed'
+relerr = adjoint_condition(C0, config)
+print('relerr=',relerr)
+'''
 ##############################################################################
 # Problem 4.1
 
