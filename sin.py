@@ -15,6 +15,7 @@ import random
 import os
 import argparse
 
+# calculate sin(x) using Tylor series
 def sin(x):
     sign = 1.0
     t = Variable(torch.Tensor([0.0]))
@@ -28,7 +29,7 @@ def sin(x):
 
     return t
 
-
+# test the gradient of sin(x) using PyTorch auto differentiation
 def test_gradient_sin():
     x = Variable(torch.Tensor([1.0]), requires_grad=True)
     y = sin(x)
@@ -38,7 +39,7 @@ def test_gradient_sin():
     print('sin(x) gradient == ', x.grad.data)
     print('cos(x) ==', math.cos(1.0))
 
-
+# build a neural network model for fitting sin(x)
 class Net(nn.Module):
 
     def __init__(self):
@@ -64,13 +65,13 @@ class Net(nn.Module):
         x = self.fc8(x)
         return x
 
-# train a model to fit sin(x)
+# train the model to fit sin(x)
 def train():
 
     EPOCHS = 10000
     batch = 128
     net = Net()
-    model_name = 'Net'
+    model_name = 'SineNet'
     summary(net, (1,1))
 
 
@@ -104,7 +105,7 @@ def train():
 def inference(x):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = Net()
-    model_name = 'Net'
+    model_name = 'SineNet'
     if os.path.exists(os.path.join("./saved_models",model_name)):
         model.load_state_dict(torch.load(os.path.join("./saved_models",model_name),map_location=torch.device(device)))
         print("=== Load from a saved model:{0} ===".format(model_name))
@@ -114,12 +115,12 @@ def inference(x):
     return y
 
 
-# use the trained model to find the inverse function of sin(x)
+# use the trained model to find the inverse function of sin(x) using Adam optimization
 def inverse(x):
-    EPOCHS = 1000
+    EPOCHS = 100
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = Net()
-    model_name = 'Net'
+    model_name = 'SineNet'
     if os.path.exists(os.path.join("./saved_models",model_name)):
         model.load_state_dict(torch.load(os.path.join("./saved_models",model_name),map_location=torch.device(device)))
         print("=== Load from a saved model:{0} ===".format(model_name))
@@ -136,7 +137,7 @@ def inverse(x):
         loss = criterion(output, target)
         loss.backward()
         optimizer.step()
-        if i % 100 == 0:
+        if i % 10 == 0:
             print(x0.item())
 
     print('The inverse of sin(x)={}, x={}.'.format(x, x0.item()), model.forward(x0))
@@ -147,7 +148,7 @@ def inverse(x):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     #model = train()
-    #torch.save(model.state_dict(), os.path.join("./saved_models/", "Net"))
+    #torch.save(model.state_dict(), os.path.join("./saved_models/", "SineNet"))
 
     y = inference(1.0)
     x = inverse(y)
