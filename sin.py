@@ -100,8 +100,22 @@ def train():
 
     return net
 
-# use the trained model to find the inverse function of sin(x)
+# calcuate sin(x)
 def inference(x):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = Net()
+    model_name = 'Net'
+    if os.path.exists(os.path.join("./saved_models",model_name)):
+        model.load_state_dict(torch.load(os.path.join("./saved_models",model_name),map_location=torch.device(device)))
+        print("=== Load from a saved model:{0} ===".format(model_name))
+    model.to(device)
+    y = model.forward(torch.FloatTensor([x])).item()
+    print('sin({})={}'.format(x, y), sin(x).item())
+    return y
+
+
+# use the trained model to find the inverse function of sin(x)
+def inverse(x):
     EPOCHS = 1000
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = Net()
@@ -111,10 +125,10 @@ def inference(x):
         print("=== Load from a saved model:{0} ===".format(model_name))
     model.to(device)
 
-    x0 = Variable(torch.FloatTensor([3.14]), requires_grad=True)
-    target = sin(x)
+    x0 = Variable(torch.FloatTensor([0.01]), requires_grad=True)
+    target = torch.FloatTensor([x])
     criterion = nn.L1Loss() # MSELoss()
-    optimizer = torch.optim.Adam([x0], lr=0.01, weight_decay=1e-5)
+    optimizer = torch.optim.Adam([x0], lr=0.1, weight_decay=1e-5)
 
     for i in range(EPOCHS):
         output = model.forward(x0)
@@ -122,9 +136,11 @@ def inference(x):
         loss = criterion(output, target)
         loss.backward()
         optimizer.step()
-        #print(x0.item())
+        if i % 100 == 0:
+            print(x0.item())
 
-    print(x0.item(),target,model.forward(torch.FloatTensor([x])), model.forward(x0))
+    print('The inverse of sin(x)={}, x={}.'.format(x, x0.item()), model.forward(x0))
+    return x0.item()
 
 
 
@@ -132,5 +148,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     #model = train()
     #torch.save(model.state_dict(), os.path.join("./saved_models/", "Net"))
-    inference(2.0)
+
+    y = inference(1.0)
+    x = inverse(y)
+    print(x)
+
 
