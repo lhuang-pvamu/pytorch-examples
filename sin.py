@@ -14,6 +14,9 @@ import math
 import random
 import os
 import argparse
+import matplotlib.pyplot as plt
+
+num_epoches = 1000
 
 # calculate sin(x) using Tylor series
 def sin(x):
@@ -56,35 +59,37 @@ class Net(nn.Module):
 
     def forward(self,x):
         x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        x = F.relu(self.fc4(x))
-        x = F.relu(self.fc5(x))
-        x = F.relu(self.fc6(x))
-        x = F.relu(self.fc7(x))
+        # x = F.relu(self.fc2(x))
+        # x = F.relu(self.fc3(x))
+        # x = F.relu(self.fc4(x))
+        # x = F.relu(self.fc5(x))
+        # x = F.relu(self.fc6(x))
+        # x = F.relu(self.fc7(x))
         x = self.fc8(x)
         return x
 
 # train the model to fit sin(x)
 def train():
 
-    EPOCHS = 10000
     batch = 128
     net = Net()
     model_name = 'SineNet'
     summary(net, (1,1))
 
 
-    criterion = nn.L1Loss() # MSELoss()
+    criterion = nn.MSELoss() #L1Loss() # MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=0.01, weight_decay=1e-5)
+    loss_hist = []
 
-    for i in range(EPOCHS):
+
+    for i in range(num_epoches):
         input = []
         result = []
         for j in range(batch):
             rand = random.uniform(0.0, 2.0 * math.pi)
             input.append(rand)
             result.append(sin(rand))
+
         x = torch.FloatTensor(input)
         x.unsqueeze_(-1)
         #print(x)
@@ -94,12 +99,18 @@ def train():
         #print(target)
         optimizer.zero_grad()
         loss = criterion(output, target)
+        loss_hist.append(loss)
         if i % 100 == 0:
             print(loss.item())
+        if i < 1000 and i%10==0:
+            plt.figure()
+            plt.plot(input, output.data, 'o')
+            plt.savefig('saved_figures/plot_{:03}.png'.format(i))
+            plt.close()
         loss.backward()
         optimizer.step()
 
-    return net
+    return net, loss_hist
 
 # calcuate sin(x)
 def inference(x):
@@ -126,7 +137,7 @@ def inverse(x):
         print("=== Load from a saved model:{0} ===".format(model_name))
     model.to(device)
 
-    x0 = Variable(torch.FloatTensor([0.01]), requires_grad=True)
+    x0 = Variable(torch.FloatTensor([2.0]), requires_grad=True)
     target = torch.FloatTensor([x])
     criterion = nn.L1Loss() # MSELoss()
     optimizer = torch.optim.Adam([x0], lr=0.1, weight_decay=1e-5)
@@ -140,18 +151,33 @@ def inverse(x):
         if i % 10 == 0:
             print(x0.item())
 
-    print('The inverse of sin(x)={}, x={}.'.format(x, x0.item()), model.forward(x0))
+    print('The inverse of sin(x)={}, x={}, model(x)={}.'.format(x, x0.item(), model.forward(x0).item()))
     return x0.item()
 
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    #model = train()
-    #torch.save(model.state_dict(), os.path.join("./saved_models/", "SineNet"))
+    training = False
+    if training:
+        model, loss_hist = train()
+        torch.save(model.state_dict(), os.path.join("./saved_models/", "SineNet"))
 
-    y = inference(1.0)
-    x = inverse(y)
-    print(x)
+        plt.figure()
+
+        plt.title("QuakeNet Training/Validation Accuracy vs. Number of Training Epochs")
+        plt.xlabel("Training Epochs")
+        plt.ylabel("Validation Accuracy")
+        plt.plot(range(1, num_epoches + 1), loss_hist, label="Training")
+        #plt.ylim((0, 1.))
+        plt.yscale("log")
+        plt.xticks(np.arange(1, num_epoches + 1, 100.0))
+        plt.legend()
+        # plt.show()
+        plt.savefig("./saved_figures/perf.png")
+
+
+    y = inference(1.0)  # y=sin(x)
+    x = inverse(y)      # x=sin^-1(y)
 
 
