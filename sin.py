@@ -68,6 +68,12 @@ class Net(nn.Module):
         x = self.fc8(x)
         return x
 
+def loss_func(output, target):
+    criterion = nn.MSELoss()
+    penalty = torch.sum(torch.abs(torch.where((output>=-1) & (output <=1), torch.zeros(1), output)))*0.000001
+    loss = criterion(output, target) + penalty
+    return loss
+
 # train the model to fit sin(x)
 def train():
 
@@ -98,7 +104,8 @@ def train():
         target.unsqueeze_(-1)
         #print(target)
         optimizer.zero_grad()
-        loss = criterion(output, target)
+        loss = loss_func(output, target)
+        #loss = criterion(output, target)
         loss_hist.append(loss)
         if i % 100 == 0:
             print(loss.item())
@@ -158,16 +165,16 @@ def inverse(x):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    training = False
+    training = True
     if training:
         model, loss_hist = train()
         torch.save(model.state_dict(), os.path.join("./saved_models/", "SineNet"))
 
         plt.figure()
 
-        plt.title("QuakeNet Training/Validation Accuracy vs. Number of Training Epochs")
+        plt.title("Sin(x) Training Accuracy vs. Number of Training Epochs")
         plt.xlabel("Training Epochs")
-        plt.ylabel("Validation Accuracy")
+        plt.ylabel("Training Accuracy")
         plt.plot(range(1, num_epoches + 1), loss_hist, label="Training")
         #plt.ylim((0, 1.))
         plt.yscale("log")
